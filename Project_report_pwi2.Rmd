@@ -1,0 +1,1083 @@
+---
+title: "Project Report"
+author: "Praminda M Imaduwa-Gamage(pwi2)"
+date: "July 25, 2017"
+output:
+  html_document: 
+    css: styles.css
+---
+
+
+### Modeling the Effect of Cigarette Smoking on the Pulmonary Function of Children
+
+### Group: One member group
+
+### 1. Introduction
+
+Reference: http://www.statsci.org/data/general/fev.html<br>
+Nature of data: Research
+
+Forced expiration is a simple but extremely useful pulmonary function test.  A spirometry tracing is obtained by having a person inhale to total lung capacity and then exhaling as hard and as completely as possible. These tracings are a very effective way of separating normal ventilatory states from obstructive and restrictive states.
+
+A study entitled the "effect of cigarette smoking on the pulmonary function of children"" by Tager, Weiss, Rosner, and Speizer (1979), and Tager, Weiss, Muno, Rosner, and Speizer (1983) aimed at assessing children's pulmonary function in the absence or presence of smoking cigarettes, as well as exposure to passive smoke from at least one parent. These papers represent some of the earliest attempts at systematic documentation regarding obvious signs of reduced pulmonary function from smoking and from exposure to second-hand smoke.
+
+In this project, I will use the data from the above mentioned study to investigate a "good" linear regression model that can explain the effect of cigarette smoking on the pulmonary function of children. 
+
+
+#### 1.1. Data Set
+
+
+```{r fev}
+fev = read.table('fev.txt', header = TRUE)
+```
+
+
+```{r, echo = FALSE, comment = NA}
+str(fev)
+fev = fev[,-1]
+head(fev)
+```
+
+**Number of observations:** `r nrow(fev)`<br>
+**Number of numerical response:** 1, FEV (Forced exploratory volume)<br>
+**Number of numerical predictors:** 2, Height & Age<br>
+**Number of categorical predictors:** 2, sex & smoker<br>
+
+FEV is an index of pulmonary function that measures the volume of air expelled after one second of constant effort. Forced expiatory volume is the most important measurement of lung function. It is used to diagnose obstructive lung diseases such as asthma and chronic obstructive pulmonary disease (COPD). The data contains determinations of FEV on 654 children ages 6-22 who were seen in the Childhood Respiratory Disease Study in 1980 in East Boston, Massachusetts. The data are part of a larger study to follow the change in pulmonary function over time in children.
+
+### 2. Methods
+
+
+```{r, include=FALSE}
+library(leaps)
+library(lmtest)
+library(knitr)
+library(kableExtra)
+library(MASS)
+library(faraway)
+```
+
+```{r app_1, echo = FALSE}
+
+get_bp_decision = function(model, alpha) {
+  decide = unname(bptest(model)$p.value < alpha)
+  ifelse(decide, "Reject", "Fail to Reject")
+}
+
+get_loocv_rmse = function(model) {
+  round(sqrt(mean((resid(model) / (1 - hatvalues(model))) ^ 2)), 3)
+}
+
+
+get_sw_decision = function(model, alpha) {
+  decide = unname(shapiro.test(resid(model))$p.value < alpha)
+  ifelse(decide, "Reject", "Fail to Reject")
+}
+
+get_num_params = function(model) {
+  length(coef(model))
+}
+
+get_adj_r2 = function(model) {
+  round(summary(model)$adj.r.squared, 3)
+}
+
+```
+
+
+#### 2.1. **Variable Selection Procedure**
+
+Initial screening for modeling FEV was performed with regsubsets() function in leap R package. Variable selection was conducted using "exhaustive" search.
+
+```{r app_2, include = FALSE, comment = NA}
+
+# INITIAL sELECTION PROCEDURE OF PREDICTORS
+model_selection <- function (initial_model, selection_procedure) {
+  
+sp = selection_procedure
+n = length(resid(initial_model))
+p = length(coef(initial_model))
+all_fev_mod_aic = n * log(sp$rss / n)  + 2 * (2:p)
+
+result_table = 
+  data.frame(RSS = sp$rss
+           , BIC = sp$bic
+           , AIC = all_fev_mod_aic
+           , adjR2 = sp$adjr2)
+
+list(
+result_table = result_table,
+#Best_values: #Minimum values, maximum adjRsquared
+bestCriterion = 
+  c(
+  sapply(result_table[, -4], min)
+  , sapply(result_table, max)['adjR2']),
+#Model-selections
+selections = 
+  c(
+  sapply(result_table[, -4], which.min)
+  , sapply(result_table, which.max)['adjR2']),
+good_model = 
+  all_fev_mod$which[which.max(all_fev_mod$adjr2),]
+)
+
+}
+
+
+```
+
+
+```{r, comment = NA}
+
+add_fev_mod = lm(FEV ~., fev)
+all_fev_mod = summary(regsubsets(FEV ~., data = fev))
+
+```
+
+
+```{r , comment = NA, warning=FALSE, echo=FALSE}
+
+kable(all_fev_mod$which, row.names = c(1, 2, 3, 4), caption = "Variable Selection")
+
+```
+
+
+```{r, comment = NA, echo = FALSE}
+result = model_selection(add_fev_mod, all_fev_mod)
+
+```
+
+
+```{r, comment = NA, echo = FALSE, warning=FALSE}
+
+kable(data.frame(round(result$result_table, 3)), row.names = c(1, 2, 3, 4), align = "l" , caption = "Quality Criterion")
+
+df = data.frame(Best_Criterion = round(result$bestCriterion, 3))
+colnames(df) = ""
+kable(t(df), align = "l", caption = "Best Quality Criterion")
+
+
+df = data.frame(Number_of_Parameters = result$selections)
+colnames(df) = ""
+kable(t(df), align = "l",  caption = "Selected Models" )
+
+
+df = data.frame(Selected_Variables = result$good_model)
+colnames(df) = ""
+kable(t(df), align = "l", caption = "Decision")
+
+```
+
+```{r app_3, echo=FALSE}
+get_parameter <- function(model){
+  
+beta_0 = coef(model)[1]
+beta_1 = coef(model)[2]
+
+int_nonsmoker = beta_0 + coef(model)[3]
+slope_nonsmoker = beta_1 + coef(model)[4]
+
+list(beta_0 = beta_0
+    , beta_1 = beta_1
+    , int_nonsmoker = int_nonsmoker
+    , slope_nonsmoker = slope_nonsmoker )
+
+}
+```
+
+
+```{r app_4, include= FALSE, comment = NA}
+diagnostics <- function (model, alpha) {
+  list(
+    p = get_num_params(model)
+    , bp = get_bp_decision(model, alpha)
+    , sw = get_sw_decision(model, alpha)
+    , rmse = get_loocv_rmse(model)
+    , adjr = get_adj_r2(model)
+  )
+}
+
+```
+
+#### 2.2. **Models**
+
+
+Variable selection procedure was used as a guild line for model development. Three quality criterion (RSS, AIC, adjR2) suggest to use all four predictors in the additive model. In the model building process, attempts were made to build a simple model that obey the linear regression assumptions. The presented models include one numerical variable, interaction between one numerical variable and one categorical variable, full additive model, additive variables with one square variable, and transformation of the response variable. Four models are gender-free models while three models include sex as a variable.
+
+Gender-free models
+
+<ul>
+$y = \beta_0 + \beta_1 x_1$<br>
+$y = \beta_0 + \beta_2 x_2$<br>
+$y = \beta_0 + \beta_1 x_1 + \beta_4 x_4 + \gamma x_1x_4$<br>
+$y = \beta_0 + \beta_2 x_2 + \beta_4 x_4 + \gamma x_2x_4$<br>
+<br>
+</ul>
+
+Full-models
+
+<ul>
+$y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \beta_3 x_3 + \beta_4 x_4$<br>
+$y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \beta_3 x_3 + \beta_4 x_4 + \gamma_1 x_1^2$$<br>
+$log(y) = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \beta_3 x_3 + \beta_4 x_4 + \gamma_1 x_1^2 + \gamma_2 x_2^2 + \delta x_1x_4$<br>
+<br>
+</ul>
+  
+  Where <br>
+  $x_1:$ Height, $x_2:$ Age, $x_3:$ Sex, $x_4:$ Smoke
+
+
+R_Codes:
+
+```{r}
+model_1 = lm(FEV ~ Height, fev)
+model_2 = lm(FEV ~ Age, fev)
+model_3 = lm(FEV ~ Height * Smoker, fev)
+model_4 = lm(FEV ~ Age * Smoker, fev)
+model_5 = lm(FEV ~ ., fev)
+model_6 = lm(FEV ~. + I(Height^2), fev)
+model_7 = lm(log(FEV) ~. + I(Height^2) + I(Age^2) + Smoker * Height, fev) 
+```
+
+<br>
+Model_7 with a subset of original data:
+
+```{r}
+cd_model_7 = cooks.distance(model_7)
+model_7_fix = lm(log(FEV) ~. + I(Height^2) + I(Age^2) + Smoker * Height, 
+             data = fev, 
+             subset = cd_model_7 <= 4/length(cd_model_7))
+
+```
+
+<br>
+
+#### 2.3. **Model Diagnostics**
+
+Regression model diagnostics were carried out with Breusch-Pagan (BP test) and Shapiro-Wilk (SW test) tests to check heteroskedasticity and normality of residuals of linear regression models, respectively. The size-effects of models were evaluated by leave one out cross validation RMSE (LOOCV_rmse) and ajusted R squared (adjR2) measures. Model's tendency to overfit data was accessed with equation
+
+$$CV(RMSE) = \sqrt{1/n \sum_{i=1}^{n}  [e_i/(1 - h_i)]^2}$$ 
+where $h_i$ are the leverages, $e_i$ are the residuals, and $n$ is number of observation. BP test and SW test were performed using bptest() and shapiro.test() in functions available in lmtest and stats R packages. Adjusted $R^2$ was reported with summary() function in R base package. get_loocv_rmse() was written to calculate LOOCV_rmse values.
+
+Residual vs fitted plots and variance inflation factor (vif() function in faraway R package) were also reported to access constant varience of residuals and multicolinearity among variables, respectively.
+
+<br>
+
+#### 2.4. **Simulations**
+
+
+To access the significance of $\hat\beta^_3$, simulation study was done with model_7_fix as follows:
+
+
+```{r, echo = TRUE, comment = NA}
+
+n = 5000
+co = coef(model_7_fix)
+co = c(co[1], co[3], co[2], co[4:8])
+
+beta0 = co[1]
+beta1 = co[2]
+beta2 = co[3]
+beta3 = co[4]
+beta4 = co[5]
+gamma1 = co[6]
+gamma2 = co[7]
+delta = co[8]
+
+cd_model_7 = cooks.distance(model_7)
+fev_sim = fev[cd_model_7 <= 4/length(cd_model_7), ]
+
+x1 = fev_sim$Height
+x2 = fev_sim$Age
+x3 = as.numeric(fev_sim$Sex)
+x4 = as.numeric(fev_sim$Smoker)
+
+pval = rep(0, n)
+set.seed(19781014)
+
+for (i in 1: n){
+    
+    error = rnorm(length(fev_sim$Height), mean = mean(log(fev_sim$FEV)), sd = sd(log(fev_sim$FEV)))
+    
+   logy = beta0 + beta1 * x1 + beta2 * x2 + beta3 * x3 + beta4 * x4 + 
+     gamma1 * x1^2 + gamma2 * x2^2  +  delta * x1 * x4 + error
+    
+     model_sim = lm(logy ~ x1 + x2 + x3 + x4 + I(x1^2) + I(x2^2) + x1 * x4)
+      pval[i] = coef(summary(model_sim))['x3', 'Pr(>|t|)']
+    
+}
+
+
+```
+
+
+
+
+### 3. Results
+
+#### 3.1. **Distribution, Central Tendency, and Spread**
+
+<br>
+
+##### (a) Distributions
+
+```{r, echo=FALSE, fig.height=8, fig.width=10}
+
+  
+NormlizedHeight = (fev$Height - mean(fev$Height))/sd(fev$Height)
+NormlizedAge = (fev$Age - mean(fev$Age))/sd(fev$Age)
+NormlizedFEV = (fev$FEV - mean(fev$FEV))/sd(fev$FEV)
+
+
+par(mfrow = c(2, 3))
+    
+hist(fev$Height,
+     main = "Height",
+     col = "lightblue",
+     xlab = "Height", cex = 1.5)
+
+hist(fev$Age,
+     main = "Age",
+     col = "lightblue",
+     xlab = "Age", cex = 1.5)
+
+hist(fev$FEV,
+     main = "FEV",
+     col = "lightblue",
+     xlab = "FEV", cex = 1.5)
+
+
+hist(NormlizedHeight,
+     main = "",
+     col = "lightblue",
+     xlab = "Normalized Height", cex = 1.5)
+
+hist(NormlizedAge,
+     main = "",
+     col = "lightblue",
+     xlab = "Normalized Age", cex = 1.5)
+
+hist(NormlizedFEV,
+     main = "",
+     col = "lightblue",
+     xlab = "Normalized FEV", cex = 1.5)
+
+```
+
+Number of non smokers:`r sum(fev$Smoker == "Non")`<br>
+Number of smokers: `r sum(fev$Smoker == "Current")`<br>
+Number of male: `r sum(fev$Sex == "Male")`<br>
+Number of female:`r sum(fev$Sex == "Female")`
+
+<br>
+
+##### (b) Central Tendency
+
+
+```{r, echo = FALSE}
+kable(data.frame( 
+  Variable = 
+    c("FEV", "Height", "Age"),
+  Mean = 
+    round(c(mean(fev$FEV), mean(fev$Height), mean(fev$Age)), 3),
+  Median = 
+    round(c(median(fev$FEV), median(fev$Height), median(fev$Age)),3)
+  ),
+  format = 'html')%>%
+  kable_styling(bootstrap_options = "striped",
+              full_width = F, position = "left")
+```
+
+<br>
+
+##### (c) Spread
+
+```{r, echo=FALSE}
+kable(data.frame( 
+  Variable = 
+    c("FEV", "Height", "Age"),
+  Variance = 
+    round(c(var(fev$FEV), var(fev$Height), var(fev$Age)), 3),
+  St.Deviation = 
+    round(c(sd(fev$FEV), sd(fev$Height), sd(fev$Age)), 3),
+  IQR = 
+    round(c(IQR(fev$FEV), IQR(fev$Height), IQR(fev$Age)), 3),
+  Minimum = 
+    round(c(min(fev$FEV), min(fev$Height), min(fev$Age)), 3),
+  Maximum = 
+    round(c(max(fev$FEV), max(fev$Height), max(fev$Age)), 3)
+  ),
+  format = 'html')%>%
+  kable_styling(bootstrap_options = "striped",
+              full_width = F, position = "left")
+```
+
+
+
+```{r, echo=FALSE, include=FALSE}
+##### (d) Spread: Sex, Smoker Catagories
+par(mfrow = c(1, 2))
+boxplot(FEV ~ Sex, data = fev, main = "Spread: Female vs Male")
+boxplot(FEV ~ Smoker, data = fev, 
+        names = expression('Nonsmokers', 'Smokers'),
+        main = "Spread: Smoker vs Non-smoker", cex =1)
+```
+
+<br>
+
+#### 3.2. **Correlations**
+
+<br>
+
+#####**Correlograms**
+```{r, echo=FALSE, fig.height=8, fig.width=8, comment=NA}
+pairs(fev[,c('FEV', 'Height', 'Age')], col = "gray", pch = 20, cex = 1.5)
+```
+
+#### 3.3. **Model_1 and Model_2: Trends of FEV**
+
+<br>
+
+#####**Model_1**
+
+<ul>
+$y = \beta_0 + \beta_1 x_1$<br>
+
+$y = `r round(coef(model_1)[1], 5)` + `r round(coef(model_1)[2], 5)` x_1$
+
+</ul>
+
+
+
+#####**Model_2**
+<ul>
+$y = \beta_0 + \beta_2 x_2$<br>
+
+$y = `r round(coef(model_2)[1], 5)` + `r round(coef(model_2)[2], 5)` x_1$
+</ul>
+
+
+```{r, echo=FALSE, fig.height=5, fig.width=10}
+
+par(mfrow = c(1, 2))
+
+colorCode = c("orange", "Cyan")
+colorCodeLine = c("orange2", "Cyan2")
+add_color <- function(dataVector) { ifelse(as.numeric(dataVector) < 2, colorCode[1], colorCode[2])}
+
+#colors = sort(unique(as.numeric(fev$Smoker))) + colSelector
+
+
+plot(FEV ~ Height
+     , data = fev
+     , pch = 20
+     , col = "grey"
+     , cex = 1.5
+     , ylab = "FEV (Liter)"
+     , xlab = "Height (Inch)"
+     , main = "Model_1")
+abline(model_1
+       , col = "slategray", lwd = 4)
+
+plot(FEV ~ Age
+     , data = fev
+     , pch = 20
+     , col = "grey"
+     , cex = 1.5
+     , ylab = ""
+     , xlab = "Age (Year)"
+     , main = "Model_2")
+abline(model_2
+       , col = "slategray", lwd = 4)
+#legend("topleft", col = c(7, 8), legend = c("Smoker", "Non-Smoker"), pch = 20)
+
+```
+
+
+#### 3.4. **Model_3 and Model_4: Trends of FEV: Smokers and Non-Smokers**
+<br>
+
+
+#####**Model_3**
+
+<ul>
+$y = \beta_0 + \beta_1 x_1 + \beta_4 x_4 + \gamma x_1x_4$<br>
+
+$y = `r round(coef(model_3)[1], 5)` + `r round(coef(model_3)[2], 5)` x_1 + `r round(coef(model_3)[3], 5)` x_4 - `r round(abs(coef(model_3)[4]), 5)` x_1 x_4$
+
+</ul> 
+
+#####**Model_4**
+
+<ul>
+$y = \beta_0 + \beta_2 x_2 + \beta_4 x_4 + \gamma x_2x_4$<br>
+
+$y = `r round(coef(model_4)[1], 5)` + `r round(coef(model_4)[2], 5)` x_1 - `r round(abs(coef(model_4)[3]), 5)` x_4 + `r round(coef(model_4)[4], 5)` x_2 x_4$
+</ul>
+
+
+
+```{r, echo=FALSE, fig.height=5, fig.width=10}
+
+par(mfrow = c(1, 2))
+
+beta = get_parameter(model_3)
+
+plot(FEV ~ Height
+     , data = fev
+     , pch = 20
+     , col = add_color(fev$Smoker)
+     , cex = 1.5
+     , ylab = "FEV (Liter)"
+     , xlab = "Height (Inch)")
+abline(beta$beta_0, beta$beta_1
+       , col = colorCodeLine[1], lwd = 4)
+abline(beta$int_nonsmoker, beta$slope_nonsmoker
+       , col = colorCodeLine[2], lwd = 4)
+legend("topleft", col = colorCode, legend = c("Smoker", "Non-Smoker"), pch = 20, cex = 1.5)
+
+
+beta = get_parameter(model_4)
+
+plot(FEV ~ Age
+   , data = fev
+   , pch = 20
+   , col = add_color(fev$Smoker)
+   , cex = 1.5
+   , ylab =""
+   , xlab = "Age (Year)")
+abline(beta$beta_0, beta$beta_1
+       , col = colorCodeLine[1], lwd = 4)
+abline(beta$int_nonsmoker, beta$slope_nonsmoker
+       , col = colorCodeLine[2], lwd = 4)
+#legend("topleft", col = c(7, 8), legend = c("Smoker", "Non-Smoker"), pch = 20)
+
+```
+
+
+#### 3.5. **Model_5, Model_6, Model_7: Search for Good-Models** 
+<br>
+
+#####**Model_5**
+
+```{r, comment = NA, include=FALSE}
+co = round(coef(model_5), 5)
+co = c(co[1], co[3], co[2], co[4:5])
+data.frame(Model_5 = co,
+           row.names = 
+             c("beta_0","beta_1", "beta_2", "beta_3", "beta_4"))
+```
+
+
+<ul>
+$y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \beta_3 x_3 + \beta_4 x_4$<br>
+
+$y = `r co[1]` + `r co[2]` x_1 + `r co[3]` x_2+ `r co[4]` x_3 + `r co[5]` x_4$
+</ul>
+
+
+
+#####**Model_6**
+
+```{r, comment = NA, include=FALSE}
+co = round(coef(model_6), 5)
+co = c(co[1], co[3], co[2], co[4:6])
+data.frame(
+  Model_6 = co, row.names = 
+  c("beta_0","beta_1", "beta_2", "beta_3", "beta_4", "gamma_1"))
+
+
+beta_0 = co[1]
+beta_1 = co[2]
+beta_2 = co[3]
+beta_3 = co[4]
+beta_4 = co[5]
+gamma_1 = co[6]
+
+```
+
+<ul>
+$y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \beta_3 x_3 + \beta_4 x_4 + \gamma_1 x_1^2$<br>
+
+
+$y = `r beta_0` - `r abs(beta_1)` x_1 + `r beta_2` x_2 + `r beta_3` x_3 + `r beta_4` x_4 + `r gamma_1` x_1^2$<br>
+
+</ul>
+
+
+#####**Model_7**
+
+
+```{r, comment = NA, include=FALSE}
+
+co = round(coef(model_7), 5)
+co = c(co[1], co[3], co[2], co[4:8])
+
+data.frame(Model_7 = co, row.names = 
+  c("beta_0","beta_1", "beta_2", "beta_3", "beta_4", "gamma_1",
+    "gamma_2", "delta"))
+
+
+
+beta_0 = co[1]
+beta_1 = co[2]
+beta_2 = co[3]
+beta_3 = co[4]
+beta_4 = co[5]
+gamma_1 = format(abs(co[6]), scientific = FALSE)
+gamma_2 = format(abs(co[7]), scientific = FALSE)
+delta = abs(co[8])
+
+```
+
+<ul>
+$log(y) = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + \beta_3 x_3 + \beta_4 x_4 + \gamma_1 x_1^2 + \gamma_2 x_2^2 + \delta x_1x_4$<br>
+
+
+$log(y) = `r beta_0` + `r beta_1` x_1 + `r beta_2` x_2 + `r beta_3` x_3 + `r beta_4` x_4 - `r gamma_1` x_1^2 - `r gamma_2` x_2^2 - `r delta` x_1x_4$<br>
+
+</ul>
+
+#####**Model_7_fix**
+
+```{r, comment = NA, include =FALSE}
+
+co = coef(model_7_fix)
+cofix = c(co[1], co[3], co[2], co[4:8])
+cofix = round(cofix, 5)
+#rfcofix = format(round(cofix, 5), scientific = FALSE)
+beta_0 = cofix[1]
+beta_1 = cofix[2]
+beta_2 = cofix[3]
+beta_3 = cofix[4]
+beta_4 = cofix[5]
+gamma_1 = format(abs(cofix[6]), scientific = FALSE)
+gamma_2 = format(cofix[7], scientific = FALSE)
+delta = abs(cofix[8])
+
+```
+
+<ul>
+$log(y) = `r beta_0` + `r beta_1` x_1 + `r beta_2` x_2 + `r beta_3` x_3 + `r beta_4` x_4 - `r gamma_1` x_1^2 + `r gamma_2` x_2^2 - `r delta` x_1x_4$<br>
+
+</ul>
+
+###**Winner**
+
+#####**Model_8**
+
+```{r, comment = NA, include=FALSE}
+cd_model_7 = cooks.distance(model_7)
+model_8 = lm(log(FEV) ~. - Sex + I(Height^2) + I(Age^2) + Smoker * Height, 
+             data = fev, 
+             subset = cd_model_7 <= 4/length(cd_model_7))
+
+co = round(coef(model_8), 5)
+beta_80 = co[1]
+beta_81 = co[3]
+beta_82 = co[2]
+beta_84 = co[4]
+gamma_81 = format(co[5], scientific = FALSE)
+gamma_82 = format(co[6], scientific = FALSE)
+delta8 = abs(co[7])
+
+```
+
+
+<ul>
+
+$log(y) = `r beta_80` + `r beta_81` x_1 + `r beta_82` x_2 + `r beta_84` x_4 + `r gamma_81` x_1^2 + `r gamma_82` x_2^2 - `r delta8` x_1x_4$<br>
+
+</ul>
+<br>
+
+#### 3.6. **Model Diagnostics**
+<br>
+**$\alpha$ = 0.01**
+```{r, echo = FALSE, comment = NA}
+alpha = 0.05
+model_1_diag = diagnostics(model = model_1, alpha)
+model_2_diag = diagnostics(model = model_2, alpha)
+model_3_diag = diagnostics(model = model_3, alpha)
+model_4_diag = diagnostics(model = model_4, alpha)
+model_5_diag = diagnostics(model = model_5, alpha)
+model_6_diag = diagnostics(model = model_6, alpha)
+model_7_diag = diagnostics(model = model_7, alpha)
+
+kable(data.frame(
+    Model_1 = c(unlist(model_1_diag))
+  , Model_2 = c(unlist(model_2_diag))
+  , Model_3 = c(unlist(model_3_diag))
+  , Model_4 = c(unlist(model_4_diag))
+  , Model_5 = c(unlist(model_5_diag))
+           , row.names = c("Parameters", "BP test", "SW test", "Loocv_rmse", "AdjR2"))
+) 
+#%>% kable_styling(bootstrap_options = "striped",
+              #full_width = F, position = "left")
+
+```
+
+<br>
+```{r, echo = FALSE, comment = NA}
+vf = t(data.frame(VIF = round(vif(model_5), 3)))
+colnames(vf) = c("Age", "Height", "Sex", "Smoker")
+
+kable(vf, caption = "Multicolinearity", align = "l")
+
+```
+
+<br><br>
+
+#### 3.7. **Developing a Good-Model**
+
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+
+par(mfrow = c(1, 2))
+
+plot(resid(model_6) ~ fitted(model_6),
+     ylab = "Residual_model_6"
+     , xlab = "Fitted_model_6"
+     , main = "Residual vs Fitted"
+     , col = "gray"
+     , pch = 20
+     )
+abline(h = 0, col = "orange2", lwd = 2)
+boxcox(model_6, plotit = TRUE, lambda = seq(-0.5, 0.5, by = 0.1))
+
+```
+
+<br>
+**$\alpha$ = 0.01**
+```{r, echo = FALSE, comment = NA}
+kable(data.frame(
+    Model_6 = c(unlist(model_6_diag))
+  , Model_7 = c(unlist(model_7_diag))
+  , row.names = c("Parameters", "BP test", "SW test", "Loocv_rmse", "AdjR2"))
+  , align = "l"
+)
+```
+
+**$\alpha$ = 0.0099**
+
+```{r, echo = FALSE, comment = NA}
+model_7_fix_diag = diagnostics(model = model_7_fix, 0.0099)
+kable(data.frame(
+    Model_7_fix = c(unlist(model_7_fix_diag))
+  , row.names = c("Parameters", "BP test", "SW test", "Loocv_rmse", "AdjR2"))
+  , align = "l"
+)
+#kable(data.frame(
+    #Model_7 = c(model_7_diag$bp, model_7_diag$sw)
+    #, row.names = c("BP test", "SW test")))
+```
+
+
+**Model_8: Winner**
+
+```{r, comment = NA, include =FALSE}
+cd_model_7 = cooks.distance(model_7)
+model_8 = lm(log(FEV) ~. - Sex + I(Height^2) + I(Age^2) + Smoker * Height, 
+             data = fev, 
+             subset = cd_model_7 <= 4/length(cd_model_7))
+
+co = round(coef(model_8), 5)
+beta_0 = co[1]
+beta_1 = co[3]
+beta_2 = co[2]
+beta_4 = co[4]
+gamma_1 = format(co[5], scientific = FALSE)
+gamma_2 = format(co[6], scientific = FALSE)
+delta = abs(co[7])
+
+```
+
+**$\alpha = 0.01$**
+
+```{r, echo  = FALSE, comment = NA}
+
+alpha = 0.01
+kable(data.frame(Model_8 = unlist(diagnostics(model_8, alpha))))
+
+```
+
+
+### 4. Discussion
+
+<br>
+
+#### 4.1. **Distribution, Central Tendency, and Spread**
+
+Histograms in section 3.1 show the distribution of height, Age, and FEV of the participents in the study. Mean and medin of height, age, and FEV are given in table (b) in section 3.1. The Histogram of height exhibits almost an normal distribution. The normalized histogram of height further confirm the normality of height distributions. Histogram of the age appears to be slightly skewed to the right. However, the normalized histogram exhibits two relative peaks; one to the left and one to the right of zero. Histograms of FEV and its normalized values are slightly right sewed (note that mean of FEV is greater than the median in table (b)). Table (c) summarizes the spread of height, age, and FEV.
+<br> <br>
+
+#### 4.2. **Correlations**
+
+Correlation plots in section 3.2 show that FEV has positive correlations with both height and age variables. FEV appears to increase somewhat non linearly with height. In section 3.6, multicolinearity among age, height, sex, and smoker variables are shown. Variance inflation factors were found to be at acceptable level (below 5) for all the variables. Hence, multicolinearity is not a concern in the model development process. 
+<br><br>
+
+#### 4.3. **Gender-Free models**
+
+
+(a) **Model_1 and Model_2: Trends of FEV**
+
+ coefficients of predictors in model_1 and model_2 are summerized in section 3.3. One inch increase in height will increase the mean FEV by `r round(coef(model_1)['Height'], 3) * 1000` ml. Aging also increases person's FEV. Aging by one year will increase the mean FEV by 
+`r round(coef(model_2)['Age'], 3) * 1000` ml.
+
+
+(b) **Model_3 and Model_4: Trends of FEV in Smokers and Non-Smokers**
+
+Coefficients of predictors in model_3 and model_4 are summarized in section 3.4. Mean increase FEV of children exposed to passive smoking is `r round(coef(model_3)['Height'], 3) * 1000` mL and that of children with non-smoking parents is `r round(coef(model_3)['Height'] + coef(model_3)['Height:SmokerNon'], 3) * 1000` mL for one inch growth in chidren's height. Hence, children exposed to passive smoking tend to forcefully exhale `r round(-coef(model_3)['Height:SmokerNon'], 3) * 1000` mL more air than children who do not exposed to passive smoking. This can be a sign of obstruction of the lung functions of children who exposed to passive smoking by their parents.
+
+Mean increase FEV of children exposed to passive smoking is `r round(coef(model_4)['Age'], 3) * 1000` mL and that of children with non-smoking parents is `r round(coef(model_4)['Age'] + coef(model_4)['Age:SmokerNon'], 3) * 1000` mL by one year of aging. Hence, children exposed to passive smoking tend to forcefully exhale `r round(coef(model_4)['Age:SmokerNon'], 3) * 1000` mL less air than the children who do not exposed to passive smoking with aging by one year.
+
+<br>
+
+#### 4.4. **Developing a good-model**
+
+Summary of model diagnostics is shown in section 3.6. Model_1 to Model_4 rejects both BP test and SW test at 0.01 significance level. Therefore, all these models fits violate contant variance and normality assumptions. However, model_1 and model_3 in which height is a predictor appear to be good fits. Adjusted R values of these two models are larger than that of model_2 and model_4 in which age is a predictor. Further, the full additive model, model_5 too violates both covarience and normality assumptions even though model explains variations of FEV better than model_1 to model_4. 
+
+Model_5, Model_6, and Model_7 are attempts in search for a good model. Here, good model is defined as fail to reject status for BP and SW test, low value for small value for loocv_rmse, and high value for the adjusted $R^2$ (AdjR2). Number of parameters are tried to keep below 10.
+
+
+Unlike model_1 to model_4, other three models included sex as a predictor. For simplicity these three models (model_5, _6, _7) are called "full-models". All the full models having high values for adjusted $R^2$ ( > 0.79) confirm their "goodness" of the fit  to data. These full models explain over 79% of variation in data. Full models have number of paramaters below 10. Model_5 which is an additive model of all predictors has the largest loocv_rmse out of the three full models. Model_6 also has nearly the same loocv_rmse as model_5. On the other hand, model_7 has the least loocv_rmse among all tested models. Model_7 also has the largest value for adjusted $R^2$.Except model_7, both other full models are not homoscedastic; they reject null hypothesis of the BP test. Residual against fitted model plot is shown in section 3.7. Model_6 was choose as it is the second best model which describe FEV variations. The plot clearly shows growing variance with increasing fitted values. FEV vs height also exhibit slightly increasing exponential behavior (section 3.2). Therefore, response variable is transformed with natural logarithm. Box-cox transformation plot in section further clarifies the selection of $log(y)$ transformation. Note that the maximum log-likelihood in box-cox plot occurs close to the $\lambda\approx0$. Model_7 was constructed based on these model diagnostics. With this transformation, BP test "fail to reject" status can be obtained for $\alpha = 0.01$. However, model_7 still violated the normality assumption. 
+
+Diagnostics of Model_7_fix is shown in section 3.7. With the removal of influential `r sum(cooks.distance(model_7) > 4/length(cooks.distance(model_7)))` points, model_7 did not fail the normality and constant variance assumptions at $\alpha = 0.0099$. loocv_rmse value further decreased and the adjusted $R^2$ also increased. Hence, model_7 can be considered as a good regression model to explain and predict variations in FEV.
+
+<br>
+
+
+#### 4.5. **Interpretation of model parameters**
+
+Model_7 has two categorical predictors. $x_3$ for Sex which take two values (female = 0 and male = 1) and $x_4$ for Smoker that takes two values (current = 0 and non = 1). The model can be reduced for different categories as follows.
+
+
+```{r, include=FALSE}
+co = coef(model_7_fix)
+cofix = c(co[1], co[3], co[2], co[4:8])
+cofix = round(cofix, 5)
+#rfcofix = format(round(cofix, 5), scientific = FALSE)
+beta_0 = cofix[1]
+beta_1 = cofix[2]
+beta_2 = cofix[3]
+beta_3 = cofix[4]
+beta_4 = cofix[5]
+gamma_1 = format(abs(cofix[6]), scientific = FALSE)
+gamma_2 = format(cofix[7], scientific = FALSE)
+delta = cofix[8]
+```
+
+
+(a) Smoking parents, female: 
+<p class = discussion>
+$log(y_1) = \beta_0 + \beta_1x_1 + \beta_2x_2 + \gamma_1x_1^2 + \gamma_2x_2^2$
+$y_1 = exp(`r beta_0` + `r beta_1` x_1 + `r beta_2` x_2 - `r gamma_1` x_1^2 + `r gamma_2`     x_2^2)$</p>
+
+(b) Smoking parents, male: 
+<p class = discussion>
+$log(y_2) = \beta_0 + \beta_3 + \beta_1x_1 + \beta_2x_2 + \gamma_1 x_1^2 + \gamma_2 x_2^2$
+$y_2 = exp(`r beta_0 + beta_3` + `r beta_1` x_1 + `r beta_2` x_2 - `r gamma_1` x_1^2 + `r gamma_2` x_2^2)$<br>
+$log(y_2) = \beta_3 + log(y_1)$<br>
+$y_2/y_1 = exp(\beta_3)$<br>
+$y_2/y_1 \approx exp(\hat\beta_3)$<br>
+$y_2/y_1 \approx `r round(exp(beta_3), 4)`$</p>
+
+
+Hence, mean FEV for a male with smoking parents can be predicted from mean FEV for a female with smoking parents.  
+
+(c) Non-smoking parents, female
+<p class = discussion>
+$log(y_3) = \beta_0 + \beta_4 + (\beta_1 + \delta)x_1 + \beta_2x_2 + \gamma_1x_1^2 + \gamma_2x_2^2$
+$y_3 = exp(`r beta_0 + beta_4` + `r beta_1 + delta` x_1 + `r beta_2` x_2 - `r gamma_1` x_1^2 + `r gamma_2` x_2^2)$</p>
+
+(d) Non-smoking parents, male
+<p class = discussion>
+$log(y_4) = \beta_0 + \beta_3 + \beta_4 + (\beta_1 + \delta)x_1 + \beta_2x_2 + \gamma_1x_1^2 + \gamma_2x_2^2$
+$y_4 = exp(`r beta_0 + beta_3 + beta_4` + `r beta_1 + delta` x_1 + `r beta_2` x_2 - `r gamma_1` x_1^2 + `r gamma_2` x_2^2)$<br>
+$y_4/y_3 = exp(\beta_3)$<br>
+$y_4/y_3 \approx exp(\hat\beta_3)$<br>
+$y_4/y_3 \approx `r round(exp(beta_3), 4)`$</p>
+
+<br>
+From (b) and (d):
+<p class = discussion>
+$y_2/y_1 = y_4/y_3 \approx `r round(exp(beta_3), 4)`$<br> $y_2/y_4$ or $y_1/y_3$ gives the mean FEV ratio between children with smoking and non-smoking parents, and this ratio is independent of gender of the child.</p> 
+
+**Significance of $\hat\beta_3$**
+
+```{r, echo = TRUE, comment = NA}
+alpha = 0.0099
+pval_test = 100 * (1 -  sum(pval < alpha)/length(pval))
+
+```
+
+
+Null hypothesis ($\hat\beta_3 = 0$) fails to reject `r pval_test` $\%$. Hence, $\hat\beta_3 = `r round(exp(beta_3), 3)`$  is statistically not significant. Hence, model_8 is presented as the final model to explain and interpret the effects of cigarette smoking on the pulmonary function of children.
+
+```{r, comment = NA, include = FALSE}
+cd_model_7 = cooks.distance(model_7)
+model_8 = lm(log(FEV) ~. - Sex + I(Height^2) + I(Age^2) + Smoker * Height, 
+             data = fev, 
+             subset = cd_model_7 <= 4/length(cd_model_7))
+
+co = round(coef(model_8), 5)
+beta_0 = co[1]
+beta_1 = co[3]
+beta_2 = co[2]
+beta_4 = co[4]
+gamma_1 = format(co[5], scientific = FALSE)
+gamma_2 = format(co[6], scientific = FALSE)
+delta = abs(co[7])
+
+```
+
+$log(y) = `r beta_0` + `r beta_1` x_1 + `r beta_2` x_2 + `r beta_4` x_4 + `r gamma_1` x_1^2 + `r gamma_2` x_2^2 - `r delta` x_1x_4$<br>
+
+
+```{r, include = FALSE, comment = NA}
+
+alpha = 0.01
+kable(data.frame(Model_8 = unlist(diagnostics(model_8, alpha))))
+
+```
+
+
+
+We see that for one inch growth in height, mean FEV is $exp(\beta_1 + \gamma_1 + \delta x_4)$. This FEV value does not depend on gender. It depends on the current smoking status of parents. The mean FEV of children living with smoking parents is
+$exp(\hat\beta_1 + \hat\gamma_1)$ = `r exp(cofix['Height'] + cofix['I(Height^2)'])` times and with non-smoking parents is
+$exp(\hat\beta_1 + \hat\gamma_1 + \hat\delta)$ = `r exp(cofix['Height'] + cofix['I(Height^2)']) + cofix['Height:SmokerNon']` times for one inch growth children's height. Mean FEV for aging by one year is given by $exp(\hat\beta_2 + \hat\gamma_2)$ = `r round(exp(beta_2 + cofix[7]), 5)`. This value is independent of the gender of the child.
+
+
+<br>
+
+### 5. Appendix
+
+<br>
+
+#### Code for Variable Selection Procedure
+
+
+```{r app_20, echo = TRUE, eval = FALSE, comment = NA}
+
+# INITIAL sELECTION PROCEDURE OF PREDICTORS
+model_selection <- function (initial_model, selection_procedure) {
+  
+sp = selection_procedure
+n = length(resid(initial_model))
+p = length(coef(initial_model))
+all_fev_mod_aic = n * log(sp$rss / n)  + 2 * (2:p)
+
+result_table = 
+  data.frame(RSS = sp$rss
+           , BIC = sp$bic
+           , AIC = all_fev_mod_aic
+           , adjR2 = sp$adjr2)
+
+list(
+result_table = result_table,
+#Best_values: #Minimum values, maximum adjRsquared
+bestCriterion = 
+  c(
+  sapply(result_table[, -4], min)
+  , sapply(result_table, max)['adjR2']),
+#Model-selections
+selections = 
+  c(
+  sapply(result_table[, -4], which.min)
+  , sapply(result_table, which.max)['adjR2']),
+good_model = 
+  all_fev_mod$which[which.max(all_fev_mod$adjr2),]
+)
+
+}
+
+
+```
+
+
+
+#### Codes for model diagnostics
+
+
+```{r app_10, echo = TRUE, eval = FALSE, comment = NA}
+
+get_bp_decision = function(model, alpha) {
+  decide = unname(bptest(model)$p.value < alpha)
+  ifelse(decide, "Reject", "Fail to Reject")
+}
+
+get_loocv_rmse = function(model) {
+  round(sqrt(mean((resid(model) / (1 - hatvalues(model))) ^ 2)), 3)
+}
+
+
+get_sw_decision = function(model, alpha) {
+  decide = unname(shapiro.test(resid(model))$p.value < alpha)
+  ifelse(decide, "Reject", "Fail to Reject")
+}
+
+get_num_params = function(model) {
+  length(coef(model))
+}
+
+get_adj_r2 = function(model) {
+  round(summary(model)$adj.r.squared, 3)
+}
+
+```
+
+
+```{r app_30, echo = TRUE, eval = FALSE, comment = NA}
+get_parameter <- function(model){
+  
+beta_0 = coef(model)[1]
+beta_1 = coef(model)[2]
+
+int_nonsmoker = beta_0 + coef(model)[3]
+slope_nonsmoker = beta_1 + coef(model)[4]
+
+list(beta_0 = beta_0
+    , beta_1 = beta_1
+    , int_nonsmoker = int_nonsmoker
+    , slope_nonsmoker = slope_nonsmoker )
+
+}
+```
+
+
+```{r app_40, echo = TRUE, eval = FALSE, comment = NA}
+diagnostics <- function (model, alpha) {
+  list(
+    p = get_num_params(model)
+    , bp = get_bp_decision(model, alpha)
+    , sw = get_sw_decision(model, alpha)
+    , rmse = get_loocv_rmse(model)
+    , adjr = get_adj_r2(model)
+  )
+}
+
+```
+
+
+```{r app_50, echo = TRUE, eval = FALSE, comment = NA}
+alpha = 0.05
+model_1_diag = diagnostics(model = model_1, alpha)
+model_2_diag = diagnostics(model = model_2, alpha)
+model_3_diag = diagnostics(model = model_3, alpha)
+model_4_diag = diagnostics(model = model_4, alpha)
+model_5_diag = diagnostics(model = model_5, alpha)
+model_6_diag = diagnostics(model = model_6, alpha)
+model_7_diag = diagnostics(model = model_7, alpha)
+
+kable(data.frame(
+    Model_1 = c(unlist(model_1_diag))
+  , Model_2 = c(unlist(model_2_diag))
+  , Model_3 = c(unlist(model_3_diag))
+  , Model_4 = c(unlist(model_4_diag))
+  , Model_5 = c(unlist(model_5_diag))
+           , row.names = c("Parameters", "BP test", "SW test", "Loocv_rmse", "AdjR2"))
+) 
+
+```
+
+
