@@ -1,0 +1,17 @@
+p.answers{ 
+    color:blue;
+}
+
+
+p.code{
+	color:green;
+}
+
+
+p.discussion {
+
+   padding-right: 5px;
+   padding-top: 10px;
+   line-height: 25px;
+
+}
