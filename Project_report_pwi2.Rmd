@@ -293,7 +293,7 @@ x3 = as.numeric(fev_sim$Sex)
 x4 = as.numeric(fev_sim$Smoker)
 
 pval = rep(0, n)
-set.seed(19781014)
+set.seed(yyyymmdd)
 
 for (i in 1: n){
     
